@@ -1,27 +1,26 @@
 set nocompatible              " be iMproved, required
 filetype off                  " required
 
-" set the runtime path to include Vundle and initialize
-set rtp+=~/.vim/bundle/Vundle.vim
-call vundle#begin()
-" alternatively, pass a path where Vundle should install plugins
-"call vundle#begin('~/some/path/here')
+if !has('nvim')
+  set ttymouse=xterm2
+endif
 
-" let Vundle manage Vundle, required
-Plugin 'gmarik/Vundle.vim'
-Plugin 'fatih/vim-go'
-Plugin 'Valloric/YouCompleteMe'
-Plugin 'scrooloose/syntastic'
-Plugin 'cstrahan/vim-capnp'
-Plugin 'fatih/molokai'
-Plugin 'kien/ctrlp.vim'
-Plugin 'majutsushi/tagbar'
-Plugin 'tpope/vim-fugitive'
+call plug#begin('~/.config/nvim/plugged')
+Plug 'nsf/gocode', {'rtp': 'nvim', 'do': '~/.config/nvim/plugged/gocode/vim/symlink.sh'}
+Plug 'fatih/vim-go'
+Plug 'scrooloose/syntastic'
+Plug 'cstrahan/vim-capnp'
+Plug 'fatih/molokai'
+Plug 'tpope/vim-fugitive'
+Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
+Plug 'zchee/deoplete-go', { 'do': 'make'}
+Plug 'zchee/deoplete-jedi'
+call plug#end()
 
-" All of your Plugins must be added before the following line
-call vundle#end()            " required
 filetype plugin indent on    " required
 filetype indent on
+
+set completeopt-=preview
 
 syntax enable
 set nu
@@ -38,29 +37,24 @@ let g:go_highlight_operators = 1
 let g:go_highlight_build_constraints = 1
 let g:go_def_mode = "godef"
 
-if !has('nvim')
-	set ttymouse=sgr
-endif
 " syntastic settings
 let g:syntastic_go_checkers = ['govet', 'errcheck']
 
-" ctrlp find working directory feature disable. (git submodule problem)
-let g:ctrlp_working_path_mode = ''
+" Use deoplete.
+let g:deoplete#enable_at_startup = 1
+let g:deoplete#sources#go#gocode_binary = $GOPATH.'/bin/gocode'
+let g:deoplete#sources#go#sort_class = ['var', 'func', 'type', 'const', 'package']
+let g:deoplete#sources#go#use_cache = 1
+let g:deoplete#sources#go#json_directory = '~/.cache/deoplete/go/$GOOS_$GOARCH'
+set completeopt+=noselect
+let g:python3_host_skip_check = 1
 
-set mouse=vn 
+" Let <Tab> also do completion
+" deoplete tab-complete
+inoremap <expr><tab> pumvisible() ? "\<c-n>" : "\<tab>"
+
+set mouse=a 
 scriptencoding utf-8
- 
-" terminal encoding (always use utf-8 if possible)
-if !has("win32") || has("gui_running")
-	set enc=utf-8 tenc=utf-8
-	if has("win32")
-		set tenc=cp949
-		let $LANG = substitute($LANG, '\(\.[^.]\+\)\?$', '.utf-8', '')
-	endif
-endif
-if &enc ==? "euc-kr"
-	set enc=cp949
-endif
 
 " EDITOR {{{ -----------------------------------------------
 set nu ru sc wrap ls=2 lz                " -- appearance
@@ -69,30 +63,10 @@ set noai nosi hls is ic cf ws scs magic  " -- search
 set sol sel=inclusive mps+=<:>           " -- moving around
 set ut=10 uc=200                         " -- swap control
 set report=0 lpl wmnu                    " -- misc.
-vnoremap p "0p
-nnoremap P "0P
 
 " encoding and file format
 set fenc=utf-8 ff=unix ffs=unix,dos,mac
 set fencs=utf-8,cp949,cp932,euc-jp,shift-jis,big5,latin2,ucs2-le
-
-" TEMPORARY/BACKUP DIRECTORY {{{ ---------------------------
-set swf nobk bex=.bak
-if exists("$HOME")
-	" makes various files written into ~/.vim/ or ~/_vim/
-	let s:home_dir = substitute($HOME, '[/\\]$', '', '')
-	if has("win32")
-		let s:home_dir = s:home_dir . '/_vim'
-	else
-		let s:home_dir = s:home_dir . '/.vim'
-	endif
-	if isdirectory(s:home_dir)
-		let &dir = s:home_dir . '/tmp,' . &dir
-		let &bdir = s:home_dir . '/backup,' . &bdir
-		let &vi = &vi . ',n' . s:home_dir . '/viminfo'
-	endif
-endif
-" }}} ------------------------------------------------------
 
 " SYNTAX {{{ -----------------------------------------------
 syntax enable
@@ -129,14 +103,54 @@ if has("autocmd")
 		\   exe "norm g`\"" |
 		\ endif
 
+	" fix window size if window size has been changed
+	if has("gui_running")
+		fu! s:ResizeWindows()
+			let l:nwins = winnr("$") | let l:num = 1
+			let l:curtop = 0 | let l:curleft = 0
+			let l:lines = &lines - &cmdheight
+			let l:prevlines = s:prevlines - &cmdheight
+			let l:cmd = ""
+			while l:num < l:nwins
+				if l:curleft == 0
+					let l:adjtop = l:curtop * l:lines / l:prevlines
+					let l:curtop = l:curtop + winheight(l:num) + 1
+					if l:curtop < l:lines
+						let l:adjheight = l:curtop * l:lines / l:prevlines - l:adjtop - 1
+						let l:cmd = l:cmd . l:num . "resize " . l:adjheight . "|"
+					endif
+				endif
+				let l:adjleft = l:curleft * &columns / s:prevcolumns
+				let l:curleft = l:curleft + winwidth(l:num) + 1
+				if l:curleft < &columns
+					let l:adjwidth = l:curleft * &columns / s:prevcolumns - l:adjleft - 1
+					let l:cmd = l:cmd . "vert " . l:num . "resize " . l:adjwidth . "|"
+				else
+					let l:curleft = 0
+				endif
+				let l:num = l:num + 1
+			endw
+			exe l:cmd
+		endf
+		fu! s:ResizeAllWindows()
+			if v:version >= 700
+				let l:tabnum = tabpagenr()
+				tabdo call s:ResizeWindows()
+				exe "norm " . l:tabnum . "gt"
+			else
+				call s:ResizeWindows()
+			endif
+			let s:prevlines = &lines | let s:prevcolumns = &columns
+		endf
+		au GUIEnter * let s:prevlines = &lines | let s:prevcolumns = &columns
+		au VimResized * call s:ResizeAllWindows()
+	endif
+
 	aug END
 endif
 " }}} ------------------------------------------------------
 set tags+=/usr/include/tags
 
-nnoremap <silent> <F7> :NERDTreeToggle<CR>
-nnoremap <silent> <F8> :TagbarToggle<CR>
-let g:tagbar_usearrows = 1
 map <c-l> :bn<CR>
 map <c-h> :bN<CR>
 map <F12> :bn<CR>
